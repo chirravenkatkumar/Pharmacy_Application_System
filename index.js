@@ -5,6 +5,7 @@ const cors = require('cors');
 const QRCode = require('qrcode');
 const path = require('path');
 const fs = require('fs');
+const cron = require('node-cron');
 require('dotenv').config();
 
 const app = express();
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS files (
     id TEXT PRIMARY KEY,
     filename TEXT NOT NULL,
     filepath TEXT NOT NULL,
+    expires_at TIMESTAMP,
     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 `).then(() => console.log("✅ Table 'files' is ready"))
@@ -69,9 +71,10 @@ app.post('/upload', upload.single('file'), async (req, res) => {
   const fileId = generateFileId(); // Generate a 6-digit numeric ID
   const fileName = req.file.filename;
   const filePath = req.file.path;
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
 
   try {
-    await pool.query('INSERT INTO files (id, filename, filepath) VALUES ($1, $2, $3)', [fileId, fileName, filePath]);
+    await pool.query('INSERT INTO files (id, filename, filepath, expires_at) VALUES ($1, $2, $3, $4)', [fileId, fileName, filePath, expiresAt]);
     
     // Generate QR Code
     const qrCode = await QRCode.toDataURL(fileId);
@@ -83,22 +86,61 @@ app.post('/upload', upload.single('file'), async (req, res) => {
   }
 });
 
+
+
+// Schedule a task to run every 5 minutes
+cron.schedule('*/5 * * * *', async () => {
+    try {
+        // Delete files where expires_at is in the past
+        const result = await pool.query('DELETE FROM files WHERE expires_at < NOW() RETURNING *');
+        
+        // Delete the actual files from the uploads folder
+        result.rows.forEach(file => {
+            fs.unlink(file.filepath, (err) => {
+                if (err) console.error(`Error deleting file ${file.filepath}:`, err);
+                else console.log(`Deleted file: ${file.filepath}`);
+            });
+        });
+
+        console.log('Expired files deleted:', result.rows.length);
+    } catch (err) {
+        console.error('Error deleting expired files:', err);
+    }
+});
+
 // 📥 **File Download API**
 app.get('/download/:id', async (req, res) => {
   const fileId = req.params.id;
 
   try {
-    const result = await pool.query('SELECT * FROM files WHERE id = $1', [fileId]);
+      const result = await pool.query('SELECT * FROM files WHERE id = $1', [fileId]);
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: "File not found" });
-    }
+      if (result.rows.length === 0) {
+          return res.status(404).json({ error: "File not found" });
+      }
 
-    const file = result.rows[0];
-    res.download(file.filepath, file.filename);
+      const file = result.rows[0];
+
+      // Send the file for download
+      res.download(file.filepath, file.filename, (err) => {
+          if (err) {
+              console.error('Error downloading file:', err);
+          } else {
+              // Delete the file after download
+              fs.unlink(file.filepath, (err) => {
+                  if (err) console.error(`Error deleting file ${file.filepath}:`, err);
+                  else console.log(`Deleted file: ${file.filepath}`);
+              });
+
+              // Delete the file record from the database
+              pool.query('DELETE FROM files WHERE id = $1', [fileId])
+                  .then(() => console.log(`Deleted file record: ${fileId}`))
+                  .catch(err => console.error('Error deleting file record:', err));
+          }
+      });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error retrieving file" });
+      console.error(err);
+      res.status(500).json({ error: "Error retrieving file" });
   }
 });
 

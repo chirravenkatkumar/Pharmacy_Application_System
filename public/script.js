@@ -1,15 +1,16 @@
-document.getElementById('fileInput').addEventListener('change', function() {
-    const fileInput = this;
-    const fileNameDisplay = document.getElementById('fileNameDisplay');
+    document.getElementById('fileInput').addEventListener('change', function() {
+        const fileInput = this;
+        const fileNameDisplay = document.getElementById('fileNameDisplay');
 
-    if (fileInput.files.length > 0) {
-        const fileName = fileInput.files[0].name;
-        fileNameDisplay.textContent = "Selected file: " + fileName;
-    } else {
-        fileNameDisplay.textContent = ""; // Clear if no file is selected
-    }
-});
+        if (fileInput.files.length > 0) {
+            const fileName = fileInput.files[0].name;
+            fileNameDisplay.textContent = "Selected file: " + fileName;
+        } else {
+            fileNameDisplay.textContent = ""; // Clear if no file is selected
+        }
+    });
 
+    
 async function uploadFile() {
     const fileInput = document.getElementById("fileInput");
     const uploadBox = document.getElementById("uploadBox");
